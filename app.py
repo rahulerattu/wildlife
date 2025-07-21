@@ -5,9 +5,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from io import BytesIO
-import ee
-import geemap
+import folium
+from streamlit_folium import st_folium
 import os
+
+# Optional Earth Engine import with robust error handling
+try:
+    import ee
+    EE_AVAILABLE = True
+except ImportError as e:
+    st.warning(f"Earth Engine not available: {e}. Using simulated data only.")
+    EE_AVAILABLE = False
+    ee = None
 
 # Page configuration
 st.set_page_config(
@@ -16,14 +25,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize Earth Engine
-try:
-    ee.Initialize()
-except Exception as e:
-    st.error(f"Error initializing Earth Engine: {e}. Using simulated data instead.")
-    use_simulated_data = True
+# Initialize Earth Engine with enhanced error handling
+if EE_AVAILABLE:
+    try:
+        ee.Initialize()
+        use_simulated_data = False
+        st.sidebar.success("✅ Earth Engine connected successfully")
+    except Exception as e:
+        st.sidebar.warning(f"⚠️ Earth Engine initialization failed: {e}")
+        use_simulated_data = True
+        EE_AVAILABLE = False
 else:
-    use_simulated_data = False
+    use_simulated_data = True
 
 # --- Sidebar ---
 st.sidebar.title("🌿 Vietnam Wildlife Monitor")
@@ -65,12 +78,18 @@ seasons = ["Dry (Nov-Apr)", "Early Wet (May-Jul)", "Late Wet (Aug-Oct)"]
 # --- EARTH ENGINE FUNCTIONS ---
 def get_aoi(area_name):
     """Get area of interest as ee.Geometry for selected protected area"""
-    details = protected_areas[area_name]
-    # Create a buffer around the point to approximate the protected area
-    point = ee.Geometry.Point([details['lon'], details['lat']])
-    # Calculate buffer radius (approximate) based on area
-    radius = np.sqrt(details['area_km2']) * 500  # rough estimate in meters
-    return point.buffer(radius)
+    if not EE_AVAILABLE:
+        return None
+    try:
+        details = protected_areas[area_name]
+        # Create a buffer around the point to approximate the protected area
+        point = ee.Geometry.Point([details['lon'], details['lat']])
+        # Calculate buffer radius (approximate) based on area
+        radius = np.sqrt(details['area_km2']) * 500  # rough estimate in meters
+        return point.buffer(radius)
+    except Exception as e:
+        st.warning(f"Error creating AOI for {area_name}: {e}")
+        return None
 
 def get_season_dates(year, season):
     """Get start and end dates for a specific season in a given year"""
@@ -91,40 +110,51 @@ def get_season_dates(year, season):
 
 def calculate_ndvi(start_date, end_date, aoi):
     """Calculate NDVI from Sentinel-2 imagery for a given time period and area"""
-    # Filter Sentinel-2 surface reflectance collection
-    s2_collection = ee.ImageCollection('COPERNICUS/S2_SR') \
-        .filterDate(start_date, end_date) \
-        .filterBounds(aoi) \
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
-    
-    # Check if collection is empty
-    if s2_collection.size().getInfo() == 0:
+    if not EE_AVAILABLE or aoi is None:
         return None
         
-    # Function to calculate NDVI for each image
-    def add_ndvi(image):
-        ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
-        return image.addBands(ndvi)
-    
-    # Map the NDVI calculation over the collection
-    ndvi_collection = s2_collection.map(add_ndvi)
-    
-    # Calculate median NDVI to reduce cloud influence
-    median_ndvi = ndvi_collection.select('NDVI').median()
-    
-    # Get mean NDVI value for the AOI
-    mean_ndvi = median_ndvi.reduceRegion(
-        reducer=ee.Reducer.mean(),
-        geometry=aoi,
-        scale=30,
-        maxPixels=1e9
-    ).get('NDVI')
-    
-    return mean_ndvi.getInfo()
+    try:
+        # Filter Sentinel-2 surface reflectance collection
+        s2_collection = ee.ImageCollection('COPERNICUS/S2_SR') \
+            .filterDate(start_date, end_date) \
+            .filterBounds(aoi) \
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
+        
+        # Check if collection is empty
+        if s2_collection.size().getInfo() == 0:
+            return None
+            
+        # Function to calculate NDVI for each image
+        def add_ndvi(image):
+            ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
+            return image.addBands(ndvi)
+        
+        # Map the NDVI calculation over the collection
+        ndvi_collection = s2_collection.map(add_ndvi)
+        
+        # Calculate median NDVI to reduce cloud influence
+        median_ndvi = ndvi_collection.select('NDVI').median()
+        
+        # Get mean NDVI value for the AOI
+        mean_ndvi = median_ndvi.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=aoi,
+            scale=30,
+            maxPixels=1e9
+        ).get('NDVI')
+        
+        return mean_ndvi.getInfo()
+    except Exception as e:
+        st.warning(f"Error calculating NDVI: {e}")
+        return None
 
 @st.cache_data(ttl=3600*24)  # Cache for 24 hours
 def fetch_ndvi_data():
     """Fetch real NDVI data from Earth Engine for all protected areas, years and seasons"""
+    if not EE_AVAILABLE:
+        st.info("Earth Engine not available. Using simulated data.")
+        return generate_ndvi_data()
+        
     data = []
     
     # Show progress
@@ -135,6 +165,26 @@ def fetch_ndvi_data():
     
     for area_name, details in protected_areas.items():
         aoi = get_aoi(area_name)
+        
+        # If AOI creation failed, skip to simulated data for this area
+        if aoi is None:
+            for year in years:
+                for season in seasons:
+                    # Generate fallback data for this area
+                    fallback_ndvi = generate_fallback_ndvi(area_name, year, season)
+                    data.append({
+                        "Location": area_name,
+                        "Year": year,
+                        "Season": season,
+                        "NDVI": fallback_ndvi,
+                        "Area_km2": details["area_km2"],
+                        "Latitude": details["lat"],
+                        "Longitude": details["lon"],
+                        "Data_Source": "Simulated (EE unavailable)"
+                    })
+                    current_iteration += 1
+                    progress_bar.progress(current_iteration / total_iterations)
+            continue
         
         for year in years:
             for season in seasons:
@@ -153,44 +203,35 @@ def fetch_ndvi_data():
                             "NDVI": ndvi_value,
                             "Area_km2": details["area_km2"],
                             "Latitude": details["lat"],
-                            "Longitude": details["lon"]
+                            "Longitude": details["lon"],
+                            "Data_Source": "Satellite (Sentinel-2)"
+                        })
+                    else:
+                        # Use fallback for this specific entry
+                        fallback_ndvi = generate_fallback_ndvi(area_name, year, season)
+                        data.append({
+                            "Location": area_name,
+                            "Year": year,
+                            "Season": season,
+                            "NDVI": fallback_ndvi,
+                            "Area_km2": details["area_km2"],
+                            "Latitude": details["lat"],
+                            "Longitude": details["lon"],
+                            "Data_Source": "Estimated (No satellite data)"
                         })
                 except Exception as e:
                     st.warning(f"Error processing {area_name} for {season} {year}: {str(e)}")
                     # Use estimated value as fallback
-                    if "Cat Ba" in area_name:
-                        base = 0.65 - 0.005 * (year - 2017)
-                    elif "Phong Nha" in area_name:
-                        base = 0.78 + 0.001 * (year - 2017)
-                    elif "Yok Don" in area_name:
-                        base = 0.58 - 0.01 * (year - 2017)
-                    elif "Bidoup Nui Ba" in area_name:
-                        base = 0.82 + 0.005 * (year - 2017)
-                    else:
-                        base = 0.70 - 0.002 * (year - 2017)
-                        
-                    # Add seasonal variation
-                    seasonal_amp = 0.1
-                    if "Dry" in season:
-                        seasonal_factor = -seasonal_amp
-                    elif "Early Wet" in season:
-                        seasonal_factor = seasonal_amp * 0.5
-                    else:
-                        seasonal_factor = seasonal_amp
-                    
-                    # Add random noise and clip
-                    ndvi = base + seasonal_factor + np.random.normal(0, 0.02)
-                    ndvi = min(max(ndvi, 0.2), 0.95)
-                    
+                    fallback_ndvi = generate_fallback_ndvi(area_name, year, season)
                     data.append({
                         "Location": area_name,
                         "Year": year,
                         "Season": season,
-                        "NDVI": ndvi,
+                        "NDVI": fallback_ndvi,
                         "Area_km2": details["area_km2"],
                         "Latitude": details["lat"],
                         "Longitude": details["lon"],
-                        "Data_Source": "Estimated (Satellite data unavailable)"
+                        "Data_Source": "Estimated (Satellite data error)"
                     })
                 
                 # Update progress bar
@@ -199,6 +240,37 @@ def fetch_ndvi_data():
     
     progress_bar.empty()
     return pd.DataFrame(data)
+
+def generate_fallback_ndvi(area_name, year, season):
+    """Generate fallback NDVI value for a specific area, year, and season"""
+    np.random.seed(hash(f"{area_name}_{year}_{season}") % 1000)  # Consistent random seed
+    
+    # Use same logic as the original fallback
+    if "Cat Ba" in area_name:
+        base = 0.65 - 0.005 * (year - 2017)
+    elif "Phong Nha" in area_name:
+        base = 0.78 + 0.001 * (year - 2017)
+    elif "Yok Don" in area_name:
+        base = 0.58 - 0.01 * (year - 2017)
+    elif "Bidoup Nui Ba" in area_name:
+        base = 0.82 + 0.005 * (year - 2017)
+    else:
+        base = 0.70 - 0.002 * (year - 2017)
+        
+    # Add seasonal variation
+    seasonal_amp = 0.1
+    if "Dry" in season:
+        seasonal_factor = -seasonal_amp
+    elif "Early Wet" in season:
+        seasonal_factor = seasonal_amp * 0.5
+    else:
+        seasonal_factor = seasonal_amp
+    
+    # Add random noise and clip
+    ndvi = base + seasonal_factor + np.random.normal(0, 0.02)
+    ndvi = min(max(ndvi, 0.2), 0.95)
+    
+    return ndvi
 
 # --- Generate simulated data ---
 @st.cache_data
@@ -295,20 +367,27 @@ def generate_habitat_metrics(df):
     return metrics_df
 
 # --- Add a data source selector ---
-data_source = st.sidebar.radio(
-    "Data Source:",
-    ["Real Satellite Data", "Simulated Data"],
-    index=0 if not use_simulated_data else 1
-)
+if EE_AVAILABLE:
+    data_source = st.sidebar.radio(
+        "Data Source:",
+        ["Real Satellite Data", "Simulated Data"],
+        index=0
+    )
+else:
+    st.sidebar.info("Earth Engine unavailable - using simulated data")
+    data_source = "Simulated Data"
 
 # Load data based on selection
-if data_source == "Real Satellite Data" and not use_simulated_data:
+if data_source == "Real Satellite Data" and EE_AVAILABLE:
     with st.spinner("Fetching satellite data from Earth Engine..."):
         ndvi_df = fetch_ndvi_data()
         st.sidebar.success("Using real Sentinel-2 satellite data")
 else:
     ndvi_df = generate_ndvi_data()
-    st.sidebar.warning("Using simulated data")
+    if not EE_AVAILABLE:
+        st.sidebar.warning("Using simulated data (Earth Engine unavailable)")
+    else:
+        st.sidebar.warning("Using simulated data")
 
 # Generate habitat metrics
 metrics_df = generate_habitat_metrics(ndvi_df)
@@ -319,65 +398,81 @@ selected_area = st.selectbox("Select Protected Area:", list(protected_areas.keys
 # Filter data for selected area
 area_df = metrics_df[metrics_df["Location"] == selected_area]
 
-# --- Display Earth Engine Map ---
-if data_source == "Real Satellite Data" and not use_simulated_data:
-    st.sidebar.markdown("### View Latest Satellite NDVI Map")
-    show_map = st.sidebar.checkbox("Show Satellite NDVI Map", value=False)
-    
-    if show_map:
-        with st.expander("Satellite NDVI Map", expanded=True):
-            st.info("Loading Earth Engine NDVI visualization... This may take a few moments.")
-            
-            # Create a map centered on the selected area
-            details = protected_areas[selected_area]
-            m = geemap.Map()
-            m.setCenter(details['lon'], details['lat'], 10)
-            
-            # Get the AOI
-            aoi = get_aoi(selected_area)
-            
-            # Add AOI boundary to the map
-            m.addLayer(aoi, {}, f"{selected_area} Boundary")
-            
-            # Get current year's NDVI for the latest season
-            current_year = max(years)
-            current_season = seasons[-1]  # Late Wet
-            start_date, end_date = get_season_dates(current_year, current_season)
-            
-            # Filter Sentinel-2 collection
-            s2_collection = ee.ImageCollection('COPERNICUS/S2_SR') \
-                .filterDate(start_date, end_date) \
-                .filterBounds(aoi) \
-                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30))
-            
-            # Calculate NDVI
-            def add_ndvi(image):
-                ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI')
-                return image.addBands(ndvi)
-                
-            ndvi_collection = s2_collection.map(add_ndvi)
-            median_ndvi = ndvi_collection.select('NDVI').median()
-            
-            # Add NDVI layer to the map
-            vis_params = {
-                'min': 0,
-                'max': 0.9,
-                'palette': [
-                    'FFFFFF', 'CE7E45', 'DF923D', 'F1B555',
-                    'FCD163', '99B718', '74A901', '66A000',
-                    '529400', '3E8601', '207401', '056201',
-                    '004C00', '023B01', '012E01', '011D01', '011301'
-                ]
-            }
-            m.addLayer(median_ndvi.clip(aoi), vis_params, 'NDVI')
-            
-            # Add a legend
-            m.add_colorbar(vis_params, label="NDVI Values")
-            
-            # Display the map
-            m_container = st.container()
-            with m_container:
-                m.to_streamlit(height=500)
+# --- Display Folium Map ---
+st.sidebar.markdown("### View Interactive Map")
+show_map = st.sidebar.checkbox("Show Interactive Map", value=True)
+
+if show_map:
+    with st.expander("Protected Area Map", expanded=True):
+        # Create a map centered on the selected area
+        details = protected_areas[selected_area]
+        
+        # Create folium map
+        m = folium.Map(
+            location=[details['lat'], details['lon']], 
+            zoom_start=10,
+            tiles='OpenStreetMap'
+        )
+        
+        # Add marker for the protected area
+        folium.Marker(
+            [details['lat'], details['lon']],
+            popup=f"""
+            <b>{selected_area}</b><br>
+            Area: {details['area_km2']} km²<br>
+            Coordinates: {details['lat']:.4f}°N, {details['lon']:.4f}°E
+            """,
+            tooltip=selected_area,
+            icon=folium.Icon(color='green', icon='tree', prefix='fa')
+        ).add_to(m)
+        
+        # Add a circle to represent the approximate protected area
+        radius = np.sqrt(details['area_km2']) * 500  # rough estimate in meters
+        folium.Circle(
+            location=[details['lat'], details['lon']],
+            radius=radius,
+            popup=f"{selected_area} Boundary (Approximate)",
+            color='green',
+            fillColor='lightgreen',
+            fillOpacity=0.3,
+            weight=2
+        ).add_to(m)
+        
+        # Add all other protected areas as reference points
+        for area_name, area_details in protected_areas.items():
+            if area_name != selected_area:
+                folium.Marker(
+                    [area_details['lat'], area_details['lon']],
+                    popup=f"""
+                    <b>{area_name}</b><br>
+                    Area: {area_details['area_km2']} km²<br>
+                    Click to select this area
+                    """,
+                    tooltip=area_name,
+                    icon=folium.Icon(color='blue', icon='leaf', prefix='fa')
+                ).add_to(m)
+        
+        # Add satellite layer option
+        if EE_AVAILABLE and data_source == "Real Satellite Data":
+            folium.TileLayer(
+                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attr='Esri',
+                name='Satellite Imagery',
+                overlay=False,
+                control=True
+            ).add_to(m)
+        
+        # Add layer control
+        folium.LayerControl().add_to(m)
+        
+        # Display the map
+        st_folium(m, width=700, height=500)
+        
+        # Add NDVI context information
+        if data_source == "Real Satellite Data" and EE_AVAILABLE:
+            st.info("🛰️ When using real satellite data, NDVI values are calculated from Sentinel-2 imagery")
+        else:
+            st.info("📊 Currently showing simulated NDVI data - enable Earth Engine for real satellite data")
 
 # --- Dashboard layout ---
 st.markdown(f"## {selected_area}")
@@ -496,12 +591,6 @@ with col2:
         source_color = "green" if data_source_info != "Simulated" else "orange"
         st.markdown(f"**Data Source:** <span style='color:{source_color}'>{data_source_info}</span>", unsafe_allow_html=True)
     
-    # Map placeholder when Earth Engine map is not shown
-    if data_source != "Real Satellite Data" or not show_map or use_simulated_data:
-        st.markdown("### Location Map")
-        map_placeholder = st.empty()
-        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/2_satellite_image_Vietnam.jpg/640px-2_satellite_image_Vietnam.jpg", caption="Vietnam Satellite Image (Placeholder)")
-    
     # Biodiversity stats (simulated)
     st.markdown("### Biodiversity Statistics")
     
@@ -577,32 +666,50 @@ st.markdown("## Download Data")
 
 # Add functionality to download chart as image
 def get_chart_as_png(fig):
-    img_bytes = fig.to_image(format="png", width=1200, height=600)
-    return img_bytes
+    try:
+        img_bytes = fig.to_image(format="png", width=1200, height=600)
+        return img_bytes
+    except Exception as e:
+        st.warning(f"Chart image export not available. Install kaleido for image downloads: pip install kaleido")
+        return None
 
 # Create download buttons for charts
 col1, col2, col3 = st.columns(3)
-with col1:
-    st.download_button(
-        label="Download NDVI Trend Chart",
-        data=get_chart_as_png(fig_trend),
-        file_name=f"{selected_area}_ndvi_trend.png",
-        mime="image/png"
-    )
-with col2:
-    st.download_button(
-        label="Download Seasonal Chart",
-        data=get_chart_as_png(fig_seasonal),
-        file_name=f"{selected_area}_seasonal_ndvi.png",
-        mime="image/png"
-    )
-with col3:
-    st.download_button(
-        label="Download Comparison Chart",
-        data=get_chart_as_png(fig_compare),
-        file_name="protected_areas_comparison.png",
-        mime="image/png"
-    )
+
+# Check if chart export is available
+try:
+    chart_data = get_chart_as_png(fig_trend)
+    if chart_data:
+        with col1:
+            st.download_button(
+                label="Download NDVI Trend Chart",
+                data=chart_data,
+                file_name=f"{selected_area}_ndvi_trend.png",
+                mime="image/png"
+            )
+        with col2:
+            st.download_button(
+                label="Download Seasonal Chart",
+                data=get_chart_as_png(fig_seasonal),
+                file_name=f"{selected_area}_seasonal_ndvi.png",
+                mime="image/png"
+            )
+        with col3:
+            st.download_button(
+                label="Download Comparison Chart",
+                data=get_chart_as_png(fig_compare),
+                file_name="protected_areas_comparison.png",
+                mime="image/png"
+            )
+    else:
+        st.info("📊 Chart image downloads require additional dependencies. CSV data download is available below.")
+except Exception:
+    with col1:
+        st.button("Download NDVI Trend Chart", disabled=True, help="Requires kaleido package")
+    with col2:
+        st.button("Download Seasonal Chart", disabled=True, help="Requires kaleido package")
+    with col3:
+        st.button("Download Comparison Chart", disabled=True, help="Requires kaleido package")
 
 # --- Download raw data ---
 @st.cache_data
