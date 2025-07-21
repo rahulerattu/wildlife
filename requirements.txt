@@ -1,6 +1,5 @@
-
-```python name=requirements.txt
-streamlit>=1.23.0
-pandas>=1.5.3
-numpy>=1.24.3
-plotly>=5.14.1
+streamlit
+pandas
+numpy
+matplotlib
+plotly
