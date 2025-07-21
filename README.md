@@ -1,11 +1,11 @@
-# Vietnam Wildlife Habitat Monitor
+# Global Wildlife Habitat Monitor
 
-A Streamlit application for monitoring vegetation health in Vietnamese wildlife habitats using satellite-derived NDVI data.
+A Streamlit application for monitoring vegetation health in global wildlife habitats using satellite-derived NDVI data.
 
 ## Features
 
-- Visualize NDVI trends across six protected areas (2017-2024)
-- Compare seasonal vegetation patterns
+- Visualize NDVI trends across six major national parks worldwide (2017-2024)
+- Compare seasonal vegetation patterns across different ecosystems
 - Track habitat fragmentation and connectivity metrics
 - Generate downloadable infographics for conservation reports
 

@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,17 +10,17 @@ import os
 
 # Page configuration
 st.set_page_config(
-    page_title="Vietnam Wildlife Habitat Monitor",
+    page_title="Global Wildlife Habitat Monitor",
     page_icon="🌿",
     layout="wide"
 )
 
 # --- Sidebar ---
-st.sidebar.title("🌿 Vietnam Wildlife Monitor")
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Flag_of_Vietnam.svg/800px-Flag_of_Vietnam.svg.png", width=100)
+st.sidebar.title("🌿 Global Wildlife Monitor")
+st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Earth_Eastern_Hemisphere.jpg/800px-Earth_Eastern_Hemisphere.jpg", width=100)
 st.sidebar.markdown("""
 ## About this Project
-This application visualizes vegetation health trends in Vietnam's protected wildlife areas using satellite imagery analysis.
+This application visualizes vegetation health trends in major protected wildlife areas around the world using satellite imagery analysis.
 
 **Key Features:**
 - NDVI (Normalized Difference Vegetation Index) time series
@@ -31,25 +32,25 @@ This application visualizes vegetation health trends in Vietnam's protected wild
 """)
 
 # --- Main Content ---
-st.title("Satellite Monitoring of Vietnam's Wildlife Habitats")
+st.title("Satellite Monitoring of Global Wildlife Habitats")
 st.markdown("""
 This dashboard provides key vegetation health indicators derived from Sentinel-2 satellite imagery 
-across Vietnam's protected areas. The data helps conservation teams identify habitat degradation, 
+across major protected areas worldwide. The data helps conservation teams identify habitat degradation, 
 monitor restoration efforts, and support wildlife protection strategies.
 """)
 
-# Protected areas in Vietnam with geographical coordinates
+# Protected areas around the world with geographical coordinates
 protected_areas = {
-    "Cat Ba National Park": {"lat": 20.7980, "lon": 107.0480, "area_km2": 263},
-    "Du Gia National Park": {"lat": 23.0893, "lon": 105.8844, "area_km2": 147},
-    "Phong Nha-Ke Bang": {"lat": 17.5906, "lon": 106.2836, "area_km2": 857},
-    "Pu Mat National Park": {"lat": 19.0218, "lon": 104.7160, "area_km2": 911},
-    "Bidoup Nui Ba": {"lat": 12.1844, "lon": 108.6981, "area_km2": 704},
-    "Yok Don National Park": {"lat": 12.8825, "lon": 107.7458, "area_km2": 1155}
+    "Yellowstone National Park": {"lat": 44.4280, "lon": -110.5885, "area_km2": 8983},
+    "Serengeti National Park": {"lat": -2.3333, "lon": 34.8333, "area_km2": 14763},
+    "Great Barrier Reef Marine Park": {"lat": -18.2871, "lon": 147.7000, "area_km2": 344400},
+    "Kruger National Park": {"lat": -23.9884, "lon": 31.5547, "area_km2": 19485},
+    "Banff National Park": {"lat": 51.4968, "lon": -115.9281, "area_km2": 6641},
+    "Galapagos National Park": {"lat": -0.8333, "lon": -91.1333, "area_km2": 7995}
 }
 
 years = list(range(2017, 2025))
-seasons = ["Dry (Nov-Apr)", "Early Wet (May-Jul)", "Late Wet (Aug-Oct)"]
+seasons = ["Dry Season", "Transition Season", "Wet Season"]
 
 # --- Generate simulated data ---
 @st.cache_data
@@ -61,26 +62,30 @@ def generate_ndvi_data():
     # Create specific patterns for each area
     for area, details in protected_areas.items():
         # Base NDVI pattern (higher in wet season, lower in dry)
-        if "Cat Ba" in area:  # Island ecosystem, less seasonal variation
-            base = 0.65
-            trend = -0.005  # slight decline
-            seasonal_amp = 0.08
-        elif "Phong Nha" in area:  # Limestone forest, high baseline
-            base = 0.78
-            trend = 0.001  # stable
-            seasonal_amp = 0.12
-        elif "Yok Don" in area:  # Dry deciduous forest, lower baseline, high seasonal variation
+        if "Yellowstone" in area:  # Temperate forest ecosystem
+            base = 0.68
+            trend = 0.002  # slight improvement
+            seasonal_amp = 0.22
+        elif "Serengeti" in area:  # Savanna ecosystem, high seasonal variation
             base = 0.58
-            trend = -0.01  # moderate decline
-            seasonal_amp = 0.20
-        elif "Bidoup Nui Ba" in area:  # Highland forest, high NDVI
-            base = 0.82
-            trend = 0.005  # improving
-            seasonal_amp = 0.10
-        else:  # Other areas
-            base = 0.70
+            trend = -0.002  # slight decline
+            seasonal_amp = 0.25
+        elif "Great Barrier Reef" in area:  # Marine ecosystem
+            base = 0.35
+            trend = -0.015  # significant decline
+            seasonal_amp = 0.05
+        elif "Kruger" in area:  # Subtropical woodland
+            base = 0.62
+            trend = -0.001  # stable to slight decline
+            seasonal_amp = 0.18
+        elif "Banff" in area:  # Alpine forest, high baseline
+            base = 0.72
+            trend = 0.001  # stable
+            seasonal_amp = 0.26
+        else:  # Galapagos - arid islands with unique ecosystem
+            base = 0.50
             trend = -0.002
-            seasonal_amp = 0.15
+            seasonal_amp = 0.10
             
         # Generate data for each year and season
         for i, year in enumerate(years):
@@ -89,8 +94,8 @@ def generate_ndvi_data():
             for season in seasons:
                 if "Dry" in season:
                     seasonal_factor = -seasonal_amp
-                elif "Early Wet" in season:
-                    seasonal_factor = seasonal_amp * 0.5
+                elif "Transition" in season:
+                    seasonal_factor = seasonal_amp * 0.3
                 else:
                     seasonal_factor = seasonal_amp
                 
@@ -99,8 +104,8 @@ def generate_ndvi_data():
                 ndvi = min(max(ndvi, 0.2), 0.95)  # Clip values to reasonable NDVI range
                 
                 # Add some random drops for disturbances in certain years/areas
-                if (year == 2019 and "Yok Don" in area and "Dry" in season) or \
-                   (year == 2022 and "Cat Ba" in area):
+                if (year == 2019 and "Yellowstone" in area and "Dry" in season) or \
+                   (year == 2022 and "Great Barrier Reef" in area):
                     ndvi -= 0.15
                 
                 data.append({
@@ -277,15 +282,46 @@ with col2:
     # Map placeholder 
     st.markdown("### Location Map")
     map_placeholder = st.empty()
-    map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/2_satellite_image_Vietnam.jpg/640px-2_satellite_image_Vietnam.jpg", caption="Vietnam Satellite Image (Placeholder)")
+    
+    # Use a conditional to show appropriate placeholder image based on selected area
+    if "Yellowstone" in selected_area:
+        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/81/Yellowstone_National_Park_satellite_map.jpg/640px-Yellowstone_National_Park_satellite_map.jpg", caption="Yellowstone National Park (Satellite Image)")
+    elif "Serengeti" in selected_area:
+        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Serengeti_national_park_map.png/640px-Serengeti_national_park_map.png", caption="Serengeti National Park (Map View)")
+    elif "Great Barrier Reef" in selected_area:
+        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Great_Barrier_Reef_satellite_image.jpg/640px-Great_Barrier_Reef_satellite_image.jpg", caption="Great Barrier Reef (Satellite Image)")
+    elif "Kruger" in selected_area:
+        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/8d/Kruger_National_Park_topographic_map-en.svg/640px-Kruger_National_Park_topographic_map-en.svg.png", caption="Kruger National Park (Topographic Map)")
+    elif "Banff" in selected_area:
+        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Satellite_image_of_Banff_and_Canmore%2C_Alberta.jpg/640px-Satellite_image_of_Banff_and_Canmore%2C_Alberta.jpg", caption="Banff National Park (Satellite Image)")
+    else:
+        map_placeholder.image("https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Satellite_image_of_the_Gal%C3%A1pagos_Islands.jpg/640px-Satellite_image_of_the_Gal%C3%A1pagos_Islands.jpg", caption="Galapagos Islands (Satellite Image)")
     
     # Biodiversity stats (simulated)
     st.markdown("### Biodiversity Statistics")
     
     # Simulate some biodiversity data based on NDVI
     recent_ndvi = area_df[area_df["Year"] == 2024]["NDVI"].mean()
-    species_count = int(100 + (recent_ndvi * 300))
-    endangered_count = int(15 + (1 - recent_ndvi) * 30)
+    
+    # Customize species count based on selected area
+    if "Yellowstone" in selected_area:
+        species_count = int(380 + (recent_ndvi * 200))
+        endangered_count = int(24 + (1 - recent_ndvi) * 30)
+    elif "Serengeti" in selected_area:
+        species_count = int(500 + (recent_ndvi * 300))
+        endangered_count = int(38 + (1 - recent_ndvi) * 40)
+    elif "Great Barrier Reef" in selected_area:
+        species_count = int(1500 + (recent_ndvi * 500))
+        endangered_count = int(120 + (1 - recent_ndvi) * 100)
+    elif "Kruger" in selected_area:
+        species_count = int(450 + (recent_ndvi * 250))
+        endangered_count = int(42 + (1 - recent_ndvi) * 35)
+    elif "Banff" in selected_area:
+        species_count = int(290 + (recent_ndvi * 180))
+        endangered_count = int(15 + (1 - recent_ndvi) * 25)
+    else:  # Galapagos
+        species_count = int(600 + (recent_ndvi * 400))
+        endangered_count = int(80 + (1 - recent_ndvi) * 50)
     
     st.metric("Estimated Species Count", species_count)
     st.metric("Endangered Species", endangered_count)
@@ -399,10 +435,10 @@ with st.expander("About the Satellite Data"):
     st.markdown("""
     ### Simulated Satellite Data
     
-    This application currently uses **simulated NDVI data** that mimics patterns typically observed in Southeast Asian forests.
+    This application currently uses **simulated NDVI data** that mimics patterns typically observed in different global ecosystems.
     
     **About the Simulation:**
-    - Data is modeled to reflect typical seasonal variations in different forest types
+    - Data is modeled to reflect typical seasonal variations in different habitat types
     - Yearly trends are based on known conservation patterns in each protected area
     - Random variations and disturbances are added to simulate real-world conditions
     
@@ -420,5 +456,5 @@ with st.expander("About the Satellite Data"):
 # --- Footer ---
 st.markdown("""
 ---
-Created for Vietnam Wildlife Conservation Association | Last updated: July 2024
+Created for Global Wildlife Conservation Initiative | Last updated: July 2025
 """)
