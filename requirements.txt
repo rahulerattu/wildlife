@@ -3,5 +3,7 @@ pandas>=1.5.3
 numpy>=1.24.3
 plotly>=5.14.1
 earthengine-api>=0.1.342
-geemap>=0.20.0
+folium>=0.14.0
+streamlit-folium>=0.20.0
+kaleido
 
