@@ -25,6 +25,21 @@ except Exception as e:
 else:
     use_simulated_data = False
 
+try:
+    import ee
+    import geemap
+    try:
+        ee.Initialize()
+        # Test if Earth Engine is actually working with a simple call
+        ee.Number(1).getInfo()
+        st.sidebar.success("✅ Earth Engine connection successful")
+    except Exception as ee_error:
+        st.sidebar.warning(f"⚠️ Earth Engine initialization failed: {str(ee_error)}")
+        use_simulated_data = True
+except ImportError as import_error:
+    st.sidebar.warning(f"⚠️ Required packages not available: {str(import_error)}")
+    use_simulated_data = True
+
 # --- Sidebar ---
 st.sidebar.title("🌿 Vietnam Wildlife Monitor")
 st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Flag_of_Vietnam.svg/800px-Flag_of_Vietnam.svg.png", width=100)
